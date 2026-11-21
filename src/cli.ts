@@ -31,7 +31,7 @@ export async function runCli(argv: string[], env: Env, version: string): Promise
       case "mcp remove":
         return await mcpRemove(env, flags);
       case "init":
-        return await init(env);
+        return await init(env, flags);
     }
   } catch (error) {
     env.err((error as Error).message);

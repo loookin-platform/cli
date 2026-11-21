@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { UsageError } from "./errors";
+import { confirm } from "./prompt";
 
 export interface Workspace {
   /** `https://acme.loookin.com` */
@@ -76,6 +77,22 @@ export async function verifyWorkspace(env: Env, workspace: Workspace): Promise<V
   const body: unknown = await res.json().catch(() => null);
   const resource = typeof body === "object" && body !== null ? (body as { resource?: unknown }).resource : undefined;
   return resource === workspace.mcpUrl ? { ok: true } : notLoookin("unexpected answer");
+}
+
+/**
+ * Runs the check and decides what a failed one means: with --yes the run goes
+ * on, a dry run only reports it, otherwise the user is asked. False = stop.
+ */
+export async function checkWorkspace(env: Env, workspace: Workspace, flags: { yes: boolean; dryRun: boolean }): Promise<boolean> {
+  const check = await verifyWorkspace(env, workspace);
+  if (check.ok) return true;
+  env.err(check.message);
+  if (flags.yes) env.err("Continuing because --yes was given.");
+  else if (!flags.dryRun && !(await confirm(env, "Continue anyway?"))) {
+    env.out("Nothing was changed.");
+    return false;
+  }
+  return true;
 }
 
 const trimSlash = (value: string) => value.replace(/\/+$/, "");

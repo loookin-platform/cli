@@ -4,7 +4,7 @@ import { bounded } from "../deadline";
 import type { Env } from "../env";
 import { UsageError } from "../errors";
 import { ask, confirm, confirmSome } from "../prompt";
-import { parseWorkspace, sameUrl, verifyWorkspace } from "../workspace";
+import { checkWorkspace, parseWorkspace, sameUrl } from "../workspace";
 
 export interface McpAddFlags {
   workspace?: string;
@@ -66,15 +66,7 @@ export async function mcpAdd(base: Env, flags: McpAddFlags): Promise<number> {
   env.out(`MCP server: ${workspace.mcpUrl} (as "${name}")`);
   env.out("The workspace name is not checked here. If it is wrong, sign-in in your client will fail.");
 
-  const check = await verifyWorkspace(env, workspace);
-  if (!check.ok) {
-    env.err(check.message);
-    if (flags.yes) env.err("Continuing because --yes was given.");
-    else if (!flags.dryRun && !(await confirm(env, "Continue anyway?"))) {
-      env.out("Nothing was changed.");
-      return 1;
-    }
-  }
+  if (!(await checkWorkspace(env, workspace, flags))) return 1;
 
   if (!targets.length) {
     env.out("\nNo supported AI client was found on this machine. Add this to your client's MCP configuration:\n");
