@@ -186,7 +186,7 @@ describe("mcp add", () => {
   it("warns about a workspace that does not answer and continues only when told to", async () => {
     const declined = machine({ answers: ["n"], fetch: () => json(404, {}) });
     expect(await run(declined, "mcp", "add", "--workspace", "acmee")).toBe(1);
-    expect(declined.errLines[0]).toMatch(/No Loookin workspace answers at https:\/\/acmee\.loookin\.com \(HTTP 404\)/);
+    expect(declined.errLines[0]).toMatch(/https:\/\/acmee\.loookin\.com does not answer like Loookin \(HTTP 404\)/);
     expect(declined.questions).toEqual(["Continue anyway? [y/N] "]);
     expect(tree(declined)).not.toContain(join("home", ".cursor", "mcp.json"));
 

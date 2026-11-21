@@ -111,8 +111,10 @@ function insert(text: string, object: Node, key: string, value: unknown): Edit[]
   }
   // The new property goes on its own line after everything that is there,
   // so a comment behind the last property stays with that property.
+  // A file that ends its lists with a comma keeps doing so, which also lets
+  // a later removal give back exactly the original text.
   const indent = lineIndent(text, last.offset);
-  const property = `${s.eol}${indent}${JSON.stringify(key)}: ${render(value, indent, s)}`;
+  const property = `${s.eol}${indent}${JSON.stringify(key)}: ${render(value, indent, s)}${comma === undefined ? "" : ","}`;
   const separator = comma === undefined ? [{ offset: end(last), length: 0, content: "," }] : [];
   if (separator.length && contentEnd === end(last)) return [{ offset: contentEnd, length: 0, content: `,${property}` }];
   return [...separator, { offset: contentEnd, length: 0, content: property }];

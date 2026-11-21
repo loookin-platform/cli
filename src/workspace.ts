@@ -45,15 +45,20 @@ export function parseWorkspace(input: string): Workspace {
 export type Verification = { ok: true } | { ok: false; reason: "not-loookin" | "network"; message: string };
 
 /**
- * Asks the workspace for its OAuth discovery document, which every Loookin
- * workspace serves publicly. This is the only request the CLI ever makes.
+ * Asks the host for its OAuth discovery document. This is the only request
+ * the CLI ever makes.
+ *
+ * It tells a Loookin host from something else (a wrong domain, a proxy, no
+ * network). It cannot tell whether the workspace exists: Loookin answers the
+ * same for every subdomain so that workspace names cannot be probed. A typo
+ * in the name shows up at sign-in, and the commands say so.
  */
 export async function verifyWorkspace(env: Env, workspace: Workspace): Promise<Verification> {
   const url = `${workspace.origin}/.well-known/oauth-protected-resource/api/mcp`;
   const notLoookin = (detail: string): Verification => ({
     ok: false,
     reason: "not-loookin",
-    message: `No Loookin workspace answers at ${workspace.origin} (${detail}). Check the workspace name.`,
+    message: `${workspace.origin} does not answer like Loookin (${detail}). Check the address.`,
   });
 
   let res: Response;

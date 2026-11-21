@@ -78,7 +78,8 @@ describe("editKey leaves the neighbours alone", () => {
 
   it("works with an existing trailing comma", () => {
     const after = set('{\n  "m": {\n    "a": 1, // c\n  }\n}\n');
-    expect(after).toBe(`{\n  "m": {\n    "a": 1, // c\n    ${NEW}\n  }\n}\n`);
+    // The file ends its lists with a comma, so the new entry does too.
+    expect(after).toBe(`{\n  "m": {\n    "a": 1, // c\n    ${NEW},\n  }\n}\n`);
     expect(parseJsonc(after)).toMatchObject({ kind: "ok" });
   });
 
@@ -148,6 +149,67 @@ describe("writeAtomic", () => {
       expect(readdirSync(dir)).toEqual(["mcp.json"]);
     } finally {
       chmodSync(dir, 0o700);
+    }
+  });
+});
+
+// The editor works on text, so it is checked against many generated files:
+// whatever the layout, the result parses, differs from the original in one
+// key only, and removing the key gives the original text back.
+describe("editKey on generated files", () => {
+  const random = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+
+  function generate(rand: () => number): { text: string; hasServers: boolean } {
+    const pick = <T,>(items: T[]) => items[Math.floor(rand() * items.length)]!;
+    const eol = pick(["\n", "\n", "\r\n"]);
+    const unit = pick(["  ", "    ", "\t"]);
+    const comment = () => pick(["", "", " // note", " /* note */"]);
+    const value = () =>
+      pick(['"x"', "1", "true", "null", '[1, 2,   3]', '{ "command": "npx", "args": ["-y", "tool"] }', '{"url":"https://example.com/mcp"}']);
+    const server = (i: number) => `${unit}${unit}"server-${i}": ${value()}`;
+
+    const count = Math.floor(rand() * 4);
+    const trailing = rand() < 0.3 ? "," : "";
+    const servers = Array.from({ length: count }, (_, i) => server(i));
+    const body =
+      count === 0
+        ? pick(["{}", "{ }", `{${eol}${unit}}`])
+        : `{${comment()}${eol}${servers.map((s, i) => s + (i < count - 1 ? "," : trailing) + comment()).join(eol)}${eol}${unit}}`;
+
+    const hasServers = rand() < 0.8;
+    const lines = [`${unit}"editor.fontSize": 14`];
+    if (hasServers) lines.splice(rand() < 0.5 ? 0 : 1, 0, `${unit}"mcpServers": ${body}`);
+    if (rand() < 0.5) lines.push(`${unit}"last": ${value()}`);
+    const head = rand() < 0.3 ? `// Settings${eol}` : "";
+    const text = `${head}{${eol}${lines.map((l, i) => l + (i < lines.length - 1 ? "," : rand() < 0.2 ? "," : "") + comment()).join(eol)}${eol}}${pick(["", eol])}`;
+    return { text, hasServers };
+  }
+
+  it("changes one key only and can be undone", () => {
+    for (let seed = 1; seed <= 500; seed++) {
+      const { text, hasServers } = generate(random(seed));
+      const before = parse(text);
+      const added = editKey(text, ["mcpServers", "loookin"], ENTRY);
+
+      const parsed = parseJsonc(added);
+      expect(parsed.kind, `seed ${seed}:\n${text}\n->\n${added}`).toBe("ok");
+      expect(parse(added), `seed ${seed}`).toEqual({
+        ...before,
+        mcpServers: { ...(before.mcpServers ?? {}), loookin: ENTRY },
+      });
+      // Every comment of the original survives.
+      const comments = (t: string) => (t.match(/\/\/ \w+|\/\* note \*\//g) ?? []).length;
+      expect(comments(added), `seed ${seed}:\n${text}\n->\n${added}`).toBe(comments(text));
+
+      const removed = editKey(added, ["mcpServers", "loookin"], undefined);
+      expect(parse(removed), `seed ${seed}`).toEqual(hasServers ? before : { ...before, mcpServers: {} });
+      // Where the servers object already had entries on their own lines, undoing is exact.
+      if (hasServers && Object.keys(before.mcpServers).length && !/"mcpServers": \{[^\n]*\}/.test(text)) {
+        expect(removed, `seed ${seed}:\n${text}\n->\n${added}\n->\n${removed}`).toBe(text);
+      }
     }
   });
 });

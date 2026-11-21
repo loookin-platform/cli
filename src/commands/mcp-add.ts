@@ -64,6 +64,7 @@ export async function mcpAdd(base: Env, flags: McpAddFlags): Promise<number> {
 
   env.out(`Workspace:  ${workspace.origin}`);
   env.out(`MCP server: ${workspace.mcpUrl} (as "${name}")`);
+  env.out("The workspace name is not checked here. If it is wrong, sign-in in your client will fail.");
 
   const check = await verifyWorkspace(env, workspace);
   if (!check.ok) {
