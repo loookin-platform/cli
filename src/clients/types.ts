@@ -45,7 +45,8 @@ export interface Client {
 
   /** What `add` would do, in words: the file and the change, or the command. */
   describeAdd(env: Env, scope: Scope, name: string, url: string, replacing: boolean): string;
-  add(env: Env, scope: Scope, name: string, url: string, replacing: boolean): Promise<void>;
+  /** `previousUrl` is the address a replaced entry had, for putting it back when the replace fails halfway. */
+  add(env: Env, scope: Scope, name: string, url: string, replacing: boolean, previousUrl?: string): Promise<void>;
 
   describeRemove(env: Env, scope: Scope, name: string): string;
   remove(env: Env, scope: Scope, name: string): Promise<void>;

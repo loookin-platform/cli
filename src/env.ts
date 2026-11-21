@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { run, which, type ExecOptions, type ExecResult } from "./exec";
+import { runCommand, which, type ExecOptions, type ExecResult } from "./exec";
 
 /**
  * Everything the CLI touches outside its own code. Commands take it as a
@@ -42,7 +42,7 @@ export function realEnv(): Env {
       }
     },
     fetch: (input, init) => fetch(input, init),
-    exec: (command, args, options) => run(command, args, { cwd: process.cwd(), ...options }),
+    exec: (command, args, options) => runCommand(command, args, { cwd: process.cwd(), ...options }, vars, process.platform),
     which: (command) => which(command, vars, process.platform),
   };
 }

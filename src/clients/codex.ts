@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runOrThrow, show } from "./command";
+import { addOrReplace, runOrThrow, show } from "./command";
 import type { Client, Entry } from "./types";
 
 // Codex is driven through its own command. `codex mcp add <name> --url <url>`
@@ -53,10 +53,8 @@ export const codex: Client = {
 
   describeAdd: (_env, _scope, name, url, replacing) =>
     (replacing ? `${show("codex", removeArgs(name))}, then ` : "") + show("codex", addArgs(name, url)),
-  async add(env, _scope, name, url, replacing) {
-    if (replacing) await runOrThrow(env, "codex", removeArgs(name));
-    await runOrThrow(env, "codex", addArgs(name, url));
-  },
+  add: (env, _scope, name, url, replacing, previousUrl) =>
+    addOrReplace(env, "codex", removeArgs(name), (to) => addArgs(name, to), url, replacing, previousUrl),
 
   describeRemove: (_env, _scope, name) => show("codex", removeArgs(name)),
   remove: (env, _scope, name) => runOrThrow(env, "codex", removeArgs(name)),

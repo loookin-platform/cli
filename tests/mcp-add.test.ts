@@ -183,6 +183,24 @@ describe("mcp add", () => {
     expect(parse(env.read(env.cursorFile)).mcpServers.loookin.url).toBe(URL);
   });
 
+  it("a replace that fails halfway puts the old entry back and says how to restore it", async () => {
+    const old = "https://old.loookin.com/api/mcp";
+    const env = fakeEnv({
+      installed: ["claude"],
+      exec: ({ args }) => {
+        if (args[1] === "get") return { stdout: `loookin:\n  Scope: User config\n  Type: http\n  URL: ${old}\n` };
+        return args.includes(URL) ? { code: 1, stderr: "Invalid server" } : {};
+      },
+    });
+    expect(await run(env, "mcp", "add", "--workspace", "acme", "--client", "claude-code", "--yes")).toBe(1);
+    expect(commands(env).slice(1)).toEqual([
+      "claude mcp remove --scope user loookin",
+      `claude mcp add --transport http --scope user loookin ${URL}`,
+      `claude mcp add --transport http --scope user loookin ${old}`,
+    ]);
+    expect(env.errLines.join("\n")).toContain(`was put back with: claude mcp add --transport http --scope user loookin ${old}`);
+  });
+
   it("warns about a workspace that does not answer and continues only when told to", async () => {
     const declined = machine({ answers: ["n"], fetch: () => json(404, {}) });
     expect(await run(declined, "mcp", "add", "--workspace", "acmee")).toBe(1);
@@ -208,6 +226,13 @@ describe("mcp add", () => {
 
     const bad = machine();
     expect(await run(bad, "mcp", "add", "--workspace", "acme", "--name", "a b; rm", "--yes")).toBe(2);
+    // A leading hyphen would be read as an option by `claude` and `codex`.
+    for (const name of ["--name=--scope", "--name=-x", "--name=-"]) {
+      expect(await run(bad, "mcp", "add", "--workspace", "acme", name, "--yes")).toBe(2);
+      expect(await run(bad, "mcp", "remove", name, "--yes")).toBe(2);
+    }
+    expect(bad.errLines.at(-1)).toMatch(/must not start with a hyphen/);
+    expect(bad.calls).toEqual([]);
     expect(await run(bad, "mcp", "add", "--workspace", "acme", "--client", "emacs", "--yes")).toBe(2);
     expect(bad.errLines.join("\n")).toMatch(/Unknown client: emacs/);
     expect(bad.fetched).toEqual([]);

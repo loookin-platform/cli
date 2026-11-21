@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
@@ -57,6 +57,36 @@ describe("cursor", () => {
     await expect(cursor.remove(env, "user", "loookin")).rejects.toThrow(/left untouched/);
     expect(env.read(path)).toBe(content);
     expect(cursor.manualAdd(env, "user", "loookin", URL).join("\n")).toContain(`"loookin": {"url":"${URL}"}`);
+  });
+
+  it("leaves a read-only file alone and says what to do by hand", async () => {
+    const env = fakeEnv();
+    const path = join(env.home, ".cursor", "mcp.json");
+    env.write(path, CURSOR_FIXTURE);
+    chmodSync(path, 0o444);
+
+    const refused = cursor.add(env, "user", "loookin", URL, false);
+    await expect(refused).rejects.toThrow(/read-only/);
+    await expect(refused).rejects.toThrow(`Add this under "mcpServers" in ${path}:\n  "loookin": {"url":"${URL}"}`);
+    expect(env.read(path)).toBe(CURSOR_FIXTURE);
+    expect(statSync(path).mode & 0o777).toBe(0o444);
+
+    await expect(cursor.remove(env, "user", "github")).rejects.toThrow(`Delete "github" under "mcpServers" in ${path}.`);
+    expect(env.read(path)).toBe(CURSOR_FIXTURE);
+  });
+
+  it("reads and edits a file that starts with a byte order mark, and keeps the mark", async () => {
+    const env = fakeEnv();
+    const path = join(env.home, ".cursor", "mcp.json");
+    const original = `\uFEFF${CURSOR_FIXTURE}`;
+    env.write(path, original);
+
+    expect((await cursor.read(env, "user", "loookin")).unreadable).toBeUndefined();
+    await cursor.add(env, "user", "loookin", URL, false);
+    expect(env.read(path).startsWith("\uFEFF{")).toBe(true);
+    expect(parse(env.read(path).slice(1)).mcpServers.loookin).toEqual({ url: URL });
+    await cursor.remove(env, "user", "loookin");
+    expect(env.read(path)).toBe(original);
   });
 
   it("removing from a missing file creates nothing", async () => {

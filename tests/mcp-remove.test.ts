@@ -99,6 +99,15 @@ describe("mcp remove", () => {
     expect(out).toContain('Settings → Connectors and remove "loookin" there');
   });
 
+  it("keeps the comments around the entry it removes", async () => {
+    const env = machine();
+    const config = (entry: string) => `{\n  "mcpServers": {${entry}\n    // "github": { "command": "npx", "args": ["-y", "gh-mcp"] }\n  }\n}\n`;
+    env.write(env.cursorFile, config(`\n    "loookin": { "url": "${URL}" }`));
+
+    expect(await run(env, "mcp", "remove", "--client", "cursor", "--yes")).toBe(0);
+    expect(env.read(env.cursorFile)).toBe(config(""));
+  });
+
   it("leaves a file it cannot parse and says so", async () => {
     const env = machine();
     env.write(env.cursorFile, "{ broken");

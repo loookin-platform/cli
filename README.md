@@ -48,8 +48,8 @@ browser and you sign in to the workspace.
 | Claude Desktop | instructions only: remote servers are added in Settings → Connectors |
 
 Config files are edited in place: only the `loookin` entry changes, comments,
-formatting and other servers stay. A file that does not parse is left alone
-and the command prints what to paste by hand.
+formatting and other servers stay. A file that does not parse or is read-only
+is left alone and the command prints what to paste by hand.
 
 Options:
 
@@ -80,7 +80,8 @@ subdomain. A typo shows up when the client fails to sign in.
 
 ## Add event tracking
 
-Run it in the directory of your app (not in a monorepo root):
+Run it in the directory of your app (not in a monorepo root; inside a
+monorepo the package manager is taken from the root of the repository):
 
 ```bash
 npx @loookin/cli init --workspace acme
@@ -116,7 +117,9 @@ options.
 
 ## Not verified yet
 
-Windows. The paths are there, but nothing has been tried on it.
+Windows. The paths are there, but nothing has been tried on it. Commands
+that are `.cmd` shims there (`npm`, `pnpm`, `yarn`, `claude`) are not started:
+the CLI prints the command for you to run.
 
 ## License
 

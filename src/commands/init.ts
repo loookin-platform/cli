@@ -167,7 +167,8 @@ export async function init(env: Env, flags: InitFlags): Promise<number> {
   // --yes covers what this command printed, not changes to AI clients.
   if (env.tty && !flags.yes && (await confirm(env, "\nConnect your AI clients to this workspace now?"))) {
     env.out("");
-    const code = await mcpAdd(env, { workspace: workspace.origin, client: [], project: false, yes: false, dryRun: false });
+    // The workspace was checked above; it is handed over, not checked again.
+    const code = await mcpAdd(env, { client: [], project: false, yes: false, dryRun: false }, workspace);
     return failed ? 1 : code;
   }
   env.out(`\nTo connect your AI clients to this workspace: ${mcpCommand}`);
