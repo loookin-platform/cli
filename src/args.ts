@@ -63,7 +63,7 @@ Commands:
   mcp add       Connect your AI clients to a workspace's MCP server
   mcp list      Show where Loookin is set up
   mcp remove    Remove Loookin from your AI clients
-  init          Add event tracking to the project in this directory (not available yet)
+  init          Add event tracking to the project in this directory
 
 Options:
   --help        Show help, also for a single command: loookin mcp add --help
@@ -125,8 +125,25 @@ ${HELP_FLAG}`,
 
   init: `Usage: loookin init [options]
 
-Adds @loookin/sdk to the project in the current directory and shows the code
-to send your first events. Not available yet.
+Run it in the directory of your app (where its package.json is). It shows
+what it found (package manager, web or server, TypeScript) and what it would
+do and, once confirmed:
+
+  1. installs @loookin/sdk with the project's package manager, unless it is
+     already a dependency
+  2. creates one new example file, in src/ when that directory exists:
+       loookin.ts    in a TypeScript project
+       loookin.js    in a JavaScript project with "type": "module"
+       loookin.mjs   in a CommonJS project (the SDK is ESM only)
+     A project that is both web and server (Next.js, Nuxt, Remix, SvelteKit)
+     gets two: loookin.client.* for the browser and loookin.server.* for the
+     server. Pass --target to get one.
+  3. says where to get the key and offers \`loookin mcp add\`
+
+No existing file is edited or overwritten: if the example file is already
+there, the code is printed instead. No key is read, created or stored. The
+example runs with dryRun: true, so nothing is stored until you remove it. A
+monorepo root is refused: run it in the app's own directory.
 
 Options:
 ${COMMON}

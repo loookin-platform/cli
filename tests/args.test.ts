@@ -68,9 +68,11 @@ describe("runCli", () => {
     expect(await runCli(["mcp", "add", "--workspace", "http://acme.loookin.com", "--yes"], env, "0")).toBe(2);
   });
 
-  it("init says it is not available yet and exits 1", async () => {
+  it("init help no longer calls the command unavailable", async () => {
     const env = fakeEnv();
-    expect(await runCli(["init", "--workspace", "acme"], env, "0")).toBe(1);
-    expect(env.errLines.join("\n")).toContain("not available yet");
+    expect(await runCli(["init", "--help"], env, "0")).toBe(0);
+    expect(await runCli(["--help"], env, "0")).toBe(0);
+    expect(env.outLines.join("\n")).not.toContain("not available");
+    expect(env.outLines.join("\n")).toContain("loookin.client.*");
   });
 });
