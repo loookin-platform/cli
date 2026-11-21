@@ -1,0 +1,39 @@
+{
+  "name": "@loookin/cli",
+  "version": "0.0.0",
+  "description": "Connect your AI clients and your project to a Loookin workspace.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/loookin-platform/cli.git"
+  },
+  "bin": {
+    "loookin": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsup",
+    "deps:check": "node scripts/check-deps.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run deps:check"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.1"
+  }
+}
