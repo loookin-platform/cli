@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Env } from "../env";
 import { CliError } from "../errors";
 
@@ -41,15 +41,54 @@ const isBoth = (name: string) => BOTH.includes(name) || name.startsWith("@remix-
 
 const names = (value: unknown) => (typeof value === "object" && value !== null ? Object.keys(value) : []);
 
-function manager(dir: string, manifest: Record<string, unknown>): Pick<Project, "manager" | "managerSource"> {
-  // "pnpm@9.1.0+sha512..." → "pnpm". The field is the project's own statement, so it wins over a lockfile.
-  const declared = typeof manifest.packageManager === "string" ? manifest.packageManager.split("@")[0] : undefined;
-  const known = MANAGERS.find((name) => name === declared);
-  if (known) return { manager: known, managerSource: "packageManager in package.json" };
+type Manager = Pick<Project, "manager" | "managerSource">;
+
+/** `packageManager` of a manifest: "pnpm@9.1.0+sha512..." → "pnpm". */
+const declaredIn = (manifest: Record<string, unknown> | null) =>
+  typeof manifest?.packageManager === "string" ? manifest.packageManager.split("@")[0] : undefined;
+
+function readManifest(dir: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What one directory says about the package manager. The `packageManager`
+ * field is the project's own statement, so it wins over a lockfile. `where`
+ * is appended to the source when the directory is not the project itself.
+ */
+function managerIn(dir: string, manifest: Record<string, unknown> | null, where: string): Manager | undefined {
+  const known = MANAGERS.find((name) => name === declaredIn(manifest));
+  if (known) return { manager: known, managerSource: `packageManager in package.json${where}` };
   for (const [file, name] of LOCKFILES) {
-    if (existsSync(join(dir, file))) return { manager: name, managerSource: file };
+    if (existsSync(join(dir, file))) return { manager: name, managerSource: `${file}${where}` };
+  }
+  if (existsSync(join(dir, "pnpm-workspace.yaml"))) return { manager: "pnpm", managerSource: `pnpm-workspace.yaml${where}` };
+  return undefined;
+}
+
+/**
+ * The package manager of the project in `dir`. An app inside a monorepo has
+ * no lockfile of its own, so the directories above are asked too, nearest
+ * first, up to the root of the repository (the directory with `.git`).
+ */
+function manager(dir: string, manifest: Record<string, unknown>): Manager {
+  const own = managerIn(dir, manifest, "");
+  if (own) return own;
+  for (let at = dir; !existsSync(join(at, ".git")) && dirname(at) !== at; ) {
+    at = dirname(at);
+    const parent = readManifest(at);
+    const found = managerIn(at, parent, ` in ${at}`);
+    if (found) return found;
+    // A workspace root that names no manager: nothing above it belongs to this project.
+    if (parent?.workspaces !== undefined) break;
   }
   // An unknown manager cannot be driven by this CLI; npm reads any package.json.
+  const declared = declaredIn(manifest);
   return { manager: "npm", managerSource: declared ? `"${declared}" in packageManager is not supported` : "default" };
 }
 

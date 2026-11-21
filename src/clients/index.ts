@@ -16,7 +16,10 @@ export const SERVER_NAME = "loookin";
 /** The server name becomes a config key and a command argument. */
 export function checkName(name: string | undefined): string {
   const value = name ?? SERVER_NAME;
-  if (!/^[a-z0-9-]+$/.test(value)) throw new UsageError("--name may contain only a-z, 0-9 and hyphens.");
+  // A leading hyphen would reach `claude` or `codex` looking like an option.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(value)) {
+    throw new UsageError("--name may contain only a-z, 0-9 and hyphens, and must not start with a hyphen.");
+  }
   return value;
 }
 

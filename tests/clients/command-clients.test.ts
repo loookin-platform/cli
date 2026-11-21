@@ -41,6 +41,39 @@ describe("claude-code", () => {
     expect(failing.calls).toHaveLength(1);
   });
 
+  const OLD = "https://old.loookin.com/api/mcp";
+  /** A machine where adding the new address fails and everything else works. */
+  const addFails = (alsoRestore = false) =>
+    fakeEnv({
+      exec: ({ args }) => (args.includes(URL) || (alsoRestore && args.includes(OLD)) ? { code: 1, stderr: "Invalid server" } : {}),
+    });
+
+  it("puts the old address back when the add of a replace fails", async () => {
+    const env = addFails();
+    const failed = claudeCode.add(env, "user", "loookin", URL, true, OLD);
+    await expect(failed).rejects.toThrow(/Invalid server/);
+    await expect(failed).rejects.toThrow(`was put back with: claude mcp add --transport http --scope user loookin ${OLD}`);
+    expect(commands(env)).toEqual([
+      "claude mcp remove --scope user loookin",
+      `claude mcp add --transport http --scope user loookin ${URL}`,
+      `claude mcp add --transport http --scope user loookin ${OLD}`,
+    ]);
+  });
+
+  it("prints the command that restores the old entry when it cannot put it back", async () => {
+    const env = addFails(true);
+    await expect(claudeCode.add(env, "project", "loookin", URL, true, OLD)).rejects.toThrow(
+      `could not be put back. Restore it with: claude mcp add --transport http --scope project loookin ${OLD}`,
+    );
+    expect(env.calls).toHaveLength(3);
+  });
+
+  it("says so when the replaced entry had no address to restore", async () => {
+    const env = addFails();
+    await expect(claudeCode.add(env, "user", "loookin", URL, true)).rejects.toThrow(/had no address to put back/);
+    expect(env.calls).toHaveLength(2);
+  });
+
   it("reads the user entry from `claude mcp get`", async () => {
     const set = fakeEnv({ exec: () => ({ stdout: GET_OUTPUT("User config (available in all your projects)", URL) }) });
     expect(await claudeCode.read(set, "user", "loookin")).toMatchObject({ entries: [{ name: "loookin", url: URL }] });
@@ -78,6 +111,12 @@ describe("codex", () => {
       "codex mcp remove loookin",
     ]);
     expect(codex.hasProjectScope).toBe(false);
+
+    const failing = fakeEnv({ exec: ({ args }) => (args.includes(URL) ? { code: 1, stderr: "bad url" } : {}) });
+    await expect(codex.add(failing, "user", "loookin", URL, true, "https://old.loookin.com/api/mcp")).rejects.toThrow(
+      "was put back with: codex mcp add loookin --url https://old.loookin.com/api/mcp",
+    );
+    expect(commands(failing).at(-1)).toBe("codex mcp add loookin --url https://old.loookin.com/api/mcp");
     expect(codex.nextSteps("loookin")[0]).toContain("codex mcp login loookin");
   });
 

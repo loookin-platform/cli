@@ -4,7 +4,7 @@ import { bounded } from "../deadline";
 import type { Env } from "../env";
 import { UsageError } from "../errors";
 import { ask, confirm, confirmSome } from "../prompt";
-import { checkWorkspace, parseWorkspace, sameUrl } from "../workspace";
+import { checkWorkspace, parseWorkspace, sameUrl, type Workspace } from "../workspace";
 
 export interface McpAddFlags {
   workspace?: string;
@@ -21,6 +21,8 @@ interface Row {
   detail: string;
   /** Lines printed under the plan: what to do by hand. */
   manual?: string[];
+  /** The address of the entry a "will replace" row replaces. */
+  previousUrl?: string;
 }
 
 async function plan(env: Env, client: Client, installed: boolean, scope: Scope, name: string, url: string): Promise<Row> {
@@ -42,20 +44,28 @@ async function plan(env: Env, client: Client, installed: boolean, scope: Scope, 
     client,
     state: "will replace",
     detail: `${existing.url ?? "an entry without a URL"} → ${url}; ${client.describeAdd(env, scope, name, url, true)}`,
+    previousUrl: existing.url,
   };
 }
 
 const genericBlock = (name: string, url: string) =>
   JSON.stringify({ mcpServers: { [name]: { type: "http", url } } }, null, 2);
 
-export async function mcpAdd(base: Env, flags: McpAddFlags): Promise<number> {
+/**
+ * `checked` is a workspace the caller has already asked about and checked
+ * (`init` offering this command): it is taken as it is, so the run makes no
+ * second request.
+ */
+export async function mcpAdd(base: Env, flags: McpAddFlags, checked?: Workspace): Promise<number> {
   const env = bounded(base);
   const name = checkName(flags.name);
   const scope: Scope = flags.project ? "project" : "user";
-  const input =
-    flags.workspace ??
-    (await ask(env, "Workspace (slug, host or URL): ", "--workspace <slug|host|url>", "to say which workspace to connect"));
-  const workspace = parseWorkspace(input);
+  const workspace =
+    checked ??
+    parseWorkspace(
+      flags.workspace ??
+        (await ask(env, "Workspace (slug, host or URL): ", "--workspace <slug|host|url>", "to say which workspace to connect")),
+    );
   // Decided before anything is looked at: without a terminal nobody can confirm.
   if (!flags.dryRun && !flags.yes && !env.tty) {
     throw new UsageError("Not running in a terminal, so nothing can be asked. Pass --yes to apply the changes or --dry-run to preview them.");
@@ -66,7 +76,7 @@ export async function mcpAdd(base: Env, flags: McpAddFlags): Promise<number> {
   env.out(`MCP server: ${workspace.mcpUrl} (as "${name}")`);
   env.out("The workspace name is not checked here. If it is wrong, sign-in in your client will fail.");
 
-  if (!(await checkWorkspace(env, workspace, flags))) return 1;
+  if (!checked && !(await checkWorkspace(env, workspace, flags))) return 1;
 
   if (!targets.length) {
     env.out("\nNo supported AI client was found on this machine. Add this to your client's MCP configuration:\n");
@@ -125,7 +135,7 @@ export async function mcpAdd(base: Env, flags: McpAddFlags): Promise<number> {
   const done: Row[] = [];
   for (const r of chosen) {
     try {
-      await r.client.add(env, scope, name, workspace.mcpUrl, r.state === "will replace");
+      await r.client.add(env, scope, name, workspace.mcpUrl, r.state === "will replace", r.previousUrl);
       env.out(`${r.client.label}: ${r.state === "will replace" ? "replaced" : "added"}.`);
       done.push(r);
     } catch (error) {

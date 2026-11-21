@@ -187,6 +187,49 @@ describe("init: package managers", () => {
     expect(commands(env)).toEqual(["pnpm add @loookin/sdk"]);
   });
 
+  describe("in a package of a monorepo", () => {
+    const APP = { name: "web", type: "module", dependencies: { react: "^19.0.0" } };
+
+    /** A repository in the fake project directory with the app in apps/web, where the command runs. */
+    function monorepo(root: Files, options: FakeOptions = {}) {
+      const env = project({ ".git/HEAD": "ref: refs/heads/main\n", "apps/web/package.json": APP, ...root }, options);
+      env.cwd = join(env.cwd, "apps", "web");
+      return env;
+    }
+
+    it.each<[string, Files, string, string]>([
+      ["pnpm workspace", { "package.json": { name: "mono", packageManager: "pnpm@9.1.0" }, "pnpm-workspace.yaml": "packages:\n  - apps/*\n", "pnpm-lock.yaml": "" }, "pnpm add @loookin/sdk", "packageManager in package.json in "],
+      ["lockfile at the root only", { "package.json": { name: "mono", workspaces: ["apps/*"] }, "yarn.lock": "" }, "yarn add @loookin/sdk", "yarn.lock in "],
+      ["pnpm-workspace.yaml alone", { "pnpm-workspace.yaml": "packages:\n  - apps/*\n" }, "pnpm add @loookin/sdk", "pnpm-workspace.yaml in "],
+      ["npm workspaces without a lockfile", { "package.json": { name: "mono", workspaces: ["apps/*"] } }, "npm install @loookin/sdk", "default"],
+    ])("%s: takes the package manager from the root", async (_name, root, command, source) => {
+      const env = monorepo(root);
+      expect(await run(env, "--workspace", "acme", "--yes")).toBe(0);
+      expect(commands(env)).toEqual([command]);
+      expect(out(env)).toMatch(new RegExp(`Package manager: ${command.split(" ")[0]} \\(${source.replace(".", "\\.")}`));
+      expect(out(env)).toContain(`Project:         ${env.cwd}`);
+    });
+
+    it("the nearest directory wins, and the package's own lockfile before any parent", async () => {
+      const root: Files = { "package.json": { name: "mono", packageManager: "pnpm@9.1.0" }, "apps/yarn.lock": "" };
+      const nearest = monorepo(root);
+      expect(await run(nearest, "--workspace", "acme", "--yes")).toBe(0);
+      expect(commands(nearest)).toEqual(["yarn add @loookin/sdk"]);
+
+      const own = monorepo({ ...root, "apps/web/bun.lock": "" });
+      expect(await run(own, "--workspace", "acme", "--yes")).toBe(0);
+      expect(commands(own)).toEqual(["bun add @loookin/sdk"]);
+    });
+
+    it("does not look above the repository", async () => {
+      const env = project({ "pnpm-lock.yaml": "", "repo/.git/HEAD": "ref: refs/heads/main\n", "repo/web/package.json": APP });
+      env.cwd = join(env.cwd, "repo", "web");
+      expect(await run(env, "--workspace", "acme", "--yes")).toBe(0);
+      expect(commands(env)).toEqual(["npm install @loookin/sdk"]);
+      expect(out(env)).toContain("Package manager: npm (default)");
+    });
+  });
+
   it("an unknown packageManager falls back and says so", async () => {
     const env = project({ "package.json": { packageManager: "deno@2.0.0", dependencies: { hono: "4" } } });
     expect(await run(env, "--workspace", "acme", "--dry-run")).toBe(0);
@@ -381,6 +424,8 @@ describe("init: the mcp add offer", () => {
       mcpServers: { loookin: { url: "https://acme.loookin.com/api/mcp" } },
     });
     expectNoSecrets(env.text());
+    // One request for the whole run: mcp add takes the workspace init has checked.
+    expect(env.fetched).toEqual(["https://acme.loookin.com/.well-known/oauth-protected-resource/api/mcp"]);
   });
 });
 

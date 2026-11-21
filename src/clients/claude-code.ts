@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { CLIENT_TIMEOUT_MS, runOrThrow, show } from "./command";
+import { addOrReplace, CLIENT_TIMEOUT_MS, runOrThrow, show } from "./command";
 import { readFileEntries, type FileSpec } from "./file";
 import type { Client, Scope } from "./types";
 
@@ -43,11 +43,9 @@ export const claudeCode: Client = {
 
   describeAdd: (_env, scope, name, url, replacing) =>
     (replacing ? `${show("claude", removeArgs(scope, name))}, then ` : "") + show("claude", addArgs(scope, name, url)),
-  async add(env, scope, name, url, replacing) {
-    // `claude mcp add` refuses a name that exists, so a replace removes first.
-    if (replacing) await runOrThrow(env, "claude", removeArgs(scope, name));
-    await runOrThrow(env, "claude", addArgs(scope, name, url));
-  },
+  // `claude mcp add` refuses a name that exists, so a replace removes first.
+  add: (env, scope, name, url, replacing, previousUrl) =>
+    addOrReplace(env, "claude", removeArgs(scope, name), (to) => addArgs(scope, name, to), url, replacing, previousUrl),
 
   describeRemove: (_env, scope, name) => show("claude", removeArgs(scope, name)),
   remove: (env, scope, name) => runOrThrow(env, "claude", removeArgs(scope, name)),
