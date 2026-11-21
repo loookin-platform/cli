@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { access, constants, lstat, mkdir, open, readFile, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { createScanner, parse, parseTree, printParseErrorCode, SyntaxKind, type Node, type ParseError } from "jsonc-parser";
 
 export type JsonObject = Record<string, unknown>;
@@ -13,11 +13,20 @@ export type JsoncFile =
 export const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Parses JSON with comments and trailing commas. An empty file is an empty object. */
+const BOM = "\uFEFF";
+
+/** Some editors on Windows start a file with a byte order mark. It is not JSON. */
+const splitBom = (text: string) => (text.startsWith(BOM) ? { bom: BOM, body: text.slice(1) } : { bom: "", body: text });
+
+/**
+ * Parses JSON with comments and trailing commas. An empty file is an empty
+ * object. `text` in the result is the file as it is, byte order mark included.
+ */
 export function parseJsonc(text: string): JsoncFile {
-  if (!text.trim()) return { kind: "ok", text, value: {} };
+  const { body } = splitBom(text);
+  if (!body.trim()) return { kind: "ok", text, value: {} };
   const errors: ParseError[] = [];
-  const value: unknown = parse(text, errors, { allowTrailingComma: true });
+  const value: unknown = parse(body, errors, { allowTrailingComma: true });
   if (errors.length) {
     const first = errors[0]!;
     return { kind: "invalid", reason: `${printParseErrorCode(first.error)} at offset ${first.offset}` };
@@ -35,6 +44,17 @@ export async function readJsonc(path: string): Promise<JsoncFile> {
     return { kind: "invalid", reason: (error as Error).message };
   }
   return parseJsonc(text);
+}
+
+/** The text of every comment, in file order. An edit must leave each one in. */
+export function commentsOf(text: string): string[] {
+  const { body } = splitBom(text);
+  const scanner = createScanner(body, false);
+  const found: string[] = [];
+  for (let kind = scanner.scan(); kind !== SyntaxKind.EOF; kind = scanner.scan()) {
+    if (kind === SyntaxKind.LineCommentTrivia || kind === SyntaxKind.BlockCommentTrivia) found.push(body.slice(scanner.getTokenOffset(), scanner.getTokenOffset() + scanner.getTokenLength()));
+  }
+  return found;
 }
 
 /** Indentation unit and line ends of the file as it is, so an edit blends in. */
@@ -63,22 +83,29 @@ function lineIndent(text: string, offset: number): string {
   return /^[ \t]*/.exec(text.slice(start, offset))![0];
 }
 
-/** What sits between two nodes: the first comma, and where the last comma or comment ends. */
-function gap(text: string, from: number, to: number): { comma?: number; contentEnd: number } {
+/**
+ * What sits between two nodes: the first comma, where the last comma or
+ * comment ends, and whether the last thing there is a `//` comment (text put
+ * behind it would become part of the comment).
+ */
+function gap(text: string, from: number, to: number): { comma?: number; contentEnd: number; endsInLineComment: boolean } {
   const scanner = createScanner(text, false);
   scanner.setPosition(from);
   let comma: number | undefined;
   let contentEnd = from;
+  let endsInLineComment = false;
   for (let kind = scanner.scan(); kind !== SyntaxKind.EOF && scanner.getTokenOffset() < to; kind = scanner.scan()) {
     const tokenEnd = scanner.getTokenOffset() + scanner.getTokenLength();
     if (kind === SyntaxKind.CommaToken) {
       comma ??= scanner.getTokenOffset();
       contentEnd = tokenEnd;
+      endsInLineComment = false;
     } else if (kind === SyntaxKind.LineCommentTrivia || kind === SyntaxKind.BlockCommentTrivia) {
       contentEnd = tokenEnd;
+      endsInLineComment = kind === SyntaxKind.LineCommentTrivia;
     }
   }
-  return { comma, contentEnd };
+  return { comma, contentEnd, endsInLineComment };
 }
 
 /** A value as multi-line JSON whose following lines sit at `indent`. */
@@ -107,7 +134,9 @@ function insert(text: string, object: Node, key: string, value: unknown): Edit[]
   // An object written on one line keeps its shape.
   if (!text.slice(object.offset, last.offset).includes("\n")) {
     const property = ` ${JSON.stringify(key)}: ${JSON.stringify(value)}`;
-    return [{ offset: comma === undefined ? end(last) : comma + 1, length: 0, content: (comma === undefined ? "," : "") + property }];
+    if (comma === undefined) return [{ offset: end(last), length: 0, content: `,${property}` }];
+    // The list ended with a comma and still does.
+    return [{ offset: comma + 1, length: 0, content: `${property},` }];
   }
   // The new property goes on its own line after everything that is there,
   // so a comment behind the last property stays with that property.
@@ -120,39 +149,60 @@ function insert(text: string, object: Node, key: string, value: unknown): Edit[]
   return [...separator, { offset: contentEnd, length: 0, content: property }];
 }
 
+/** Where the run of spaces and tabs around `offset` starts and ends. */
+const blankStart = (text: string, offset: number) => offset - /[ \t]*$/.exec(text.slice(0, offset))![0].length;
+const blankEnd = (text: string, offset: number) => offset + /^[ \t]*/.exec(text.slice(offset))![0].length;
+const endsLine = (text: string, offset: number) => offset >= text.length || text[offset] === "\n" || text.startsWith("\r\n", offset);
+
+/**
+ * Takes out a property and exactly one comma: the one behind it, or, when it
+ * is the last property, the one that led to it. Comments are never part of a
+ * cut, whichever side of the property they are on; only spaces, tabs and at
+ * most the property's own line go with it.
+ */
 function remove(text: string, object: Node, property: Node): Edit[] {
   const siblings = object.children!;
   const index = siblings.indexOf(property);
   const previous = siblings[index - 1];
   const next = siblings[index + 1];
-  const after = gap(text, end(property), next ? next.offset : end(object) - 1);
+  const open = object.offset + 1;
+  const close = end(object) - 1;
+  const before = gap(text, previous ? end(previous) : open, property.offset);
+  const after = gap(text, end(property), next ? next.offset : close);
   const cut = (from: number, to: number): Edit => ({ offset: from, length: to - from, content: "" });
 
+  // A comma right behind the property goes in the same cut. One further away
+  // (a comment in between, another line) is cut on its own, and so is the one
+  // before a last property, which would otherwise be left trailing.
+  const adjacent = after.comma !== undefined && blankEnd(text, end(property)) === after.comma;
+  const tail = adjacent ? after.comma! + 1 : end(property);
+  const comma = adjacent ? undefined : (after.comma ?? (next ? undefined : before.comma));
+  const edits = comma === undefined ? [] : [cut(comma, comma + 1)];
+
   // The only property goes: the object closes up to `{}` instead of keeping
-  // an empty line, unless a comment in it would be lost.
+  // an empty line, but only when nothing else is in it. A comment stays.
   if (!previous && !next) {
-    const inner = text.slice(object.offset + 1, end(object) - 1);
-    const rest = inner.slice(0, property.offset - object.offset - 1) + inner.slice(after.contentEnd - object.offset - 1);
-    if (!rest.trim()) return [cut(object.offset + 1, end(object) - 1)];
+    const rest = text.slice(open, property.offset) + text.slice(end(property), close);
+    if (!rest.replace(",", "").trim()) return [cut(open, close)];
   }
 
   const lineStart = text.lastIndexOf("\n", property.offset - 1) + 1;
   const ownLine = lineStart > object.offset && !text.slice(lineStart, property.offset).trim();
+  const restEnd = blankEnd(text, tail);
   if (ownLine) {
-    // Take the property's lines and its comma, nothing around them.
-    const from = lineStart - (text[lineStart - 2] === "\r" ? 2 : 1);
-    const edits = [cut(from, after.comma === undefined ? end(property) : after.comma + 1)];
-    // It was the last one: the comma that led to it must go too, or strict
-    // JSON is left with a trailing comma.
-    if (!next && previous && after.comma === undefined) {
-      const before = gap(text, end(previous), property.offset).comma;
-      if (before !== undefined) edits.push(cut(before, before + 1));
-    }
-    return edits;
+    const lineBreak = lineStart - (text[lineStart - 2] === "\r" ? 2 : 1);
+    // Nothing else on its lines: they go whole.
+    if (endsLine(text, restEnd)) return [...edits, cut(lineBreak, restEnd)];
+    // Only the closing brace follows: it moves up to where it was before the
+    // property was added, unless a `//` comment there would swallow it.
+    if (!next && !before.endsInLineComment && !text.slice(tail, close).trim()) return [...edits, cut(lineBreak, tail)];
+    // A comment or a neighbour follows: it keeps the line and the indentation.
+    return [...edits, cut(property.offset, restEnd)];
   }
-  if (next) return [cut(property.offset, next.offset)];
-  if (previous) return [cut(end(previous), end(property))];
-  return [cut(property.offset, after.comma === undefined ? end(property) : after.comma + 1)];
+  // Something else starts the line. What follows moves up to the property's
+  // place; at the end of a line or of the list, the space before it goes instead.
+  if (endsLine(text, restEnd) || !next) return [...edits, cut(blankStart(text, property.offset), tail)];
+  return [...edits, cut(property.offset, restEnd)];
 }
 
 const nest = (path: string[], value: unknown): unknown =>
@@ -167,7 +217,12 @@ const nest = (path: string[], value: unknown): unknown =>
  * written on one line gets expanded), and on removal it takes the comments
  * around the property with it.
  */
-export function editKey(text: string, path: string[], value: unknown): string {
+export function editKey(file: string, path: string[], value: unknown): string {
+  const { bom, body } = splitBom(file);
+  return bom + editBody(body, path, value);
+}
+
+function editBody(text: string, path: string[], value: unknown): string {
   if (!text.trim()) return value === undefined ? text : `${JSON.stringify(nest(path, value), null, 2)}\n`;
 
   let object = parseTree(text, [], { allowTrailingComma: true });
@@ -188,18 +243,46 @@ export function editKey(text: string, path: string[], value: unknown): string {
   return text;
 }
 
+/** Follows symlinks to the file a path stands for, also when the last link points at nothing yet. */
+async function linkTarget(path: string): Promise<string> {
+  let target = path;
+  // A dotfile manager may link a config that it has not created. Writing to
+  // the path itself would replace the link with a file, so the link is read.
+  for (let hops = 0; hops < 16; hops++) {
+    try {
+      return await realpath(target);
+    } catch {
+      const link = await lstat(target).then(
+        (s) => s.isSymbolicLink(),
+        () => false,
+      );
+      if (!link) return target;
+      target = resolve(dirname(target), await readlink(target));
+    }
+  }
+  throw new Error("too many levels of symbolic links");
+}
+
 /**
  * Replaces a file so that an interruption leaves either the old content or
  * the new one, never half: write a temp file next to it, then rename. A
  * symlinked config (dotfile managers) keeps its link, the target is replaced.
+ * A file that is not writable is refused: the rename would get around a
+ * protection its owner put there.
  */
 export async function writeAtomic(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const target = await realpath(path).catch(() => path);
+  const target = await linkTarget(path);
+  if (target !== path) await mkdir(dirname(target), { recursive: true });
   const mode = await stat(target).then(
     (s) => s.mode & 0o777,
     () => undefined,
   );
+  if (mode !== undefined) {
+    await access(target, constants.W_OK).catch(() => {
+      throw new Error("the file is read-only");
+    });
+  }
   const temp = join(dirname(target), `.${basename(target)}.${randomBytes(6).toString("hex")}.tmp`);
   try {
     const handle = await open(temp, "wx", mode);

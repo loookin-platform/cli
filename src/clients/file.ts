@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Env } from "../env";
 import { CliError } from "../errors";
-import { editKey, isObject, parseJsonc, readJsonc, writeAtomic, type JsonObject, type JsoncFile } from "../jsonc";
+import { commentsOf, editKey, isObject, parseJsonc, readJsonc, writeAtomic, type JsonObject, type JsoncFile } from "../jsonc";
 import type { Entry, ReadResult, Scope } from "./types";
 
 /** What differs between clients that keep MCP servers in a JSON file. */
@@ -44,25 +44,39 @@ async function edit(env: Env, spec: FileSpec, scope: Scope, name: string, value:
   if (unreadable) throw new CliError(`${path} was left untouched: ${unreadable}.`);
   if (file.kind !== "ok" && value === undefined) return;
   const before = file.kind === "ok" ? file.value : {};
+  const original = file.kind === "ok" ? file.text : "";
   let text: string;
   try {
-    text = editKey(file.kind === "ok" ? file.text : "", [spec.key, name], value);
+    text = editKey(original, [spec.key, name], value);
   } catch (error) {
     throw new CliError(`${path} was left untouched: ${(error as Error).message}`);
   }
   // The edit is computed on the text. Before anything reaches the disk, the
   // result is parsed again and must be exactly the old content with this one
-  // server changed; otherwise the file stays as it is.
+  // server changed, and every comment still in it; otherwise the file stays
+  // as it is.
   const after = parseJsonc(text);
-  if (after.kind !== "ok" || !isDeepStrictEqual(after.value, expected(before, spec.key, name, value))) {
+  if (
+    after.kind !== "ok" ||
+    !isDeepStrictEqual(after.value, expected(before, spec.key, name, value)) ||
+    !isDeepStrictEqual(commentsOf(text).sort(), commentsOf(original).sort())
+  ) {
     throw new CliError(`${path} was left untouched: the edit could not be applied safely.`);
   }
   try {
     await writeAtomic(path, text);
   } catch (error) {
-    throw new CliError(`Could not write ${path}: ${(error as Error).message}`);
+    const byHand = value === undefined ? manualRemove(path, spec.key, name) : manualAdd(path, spec.key, name, value);
+    throw new CliError([`Could not write ${path}: ${(error as Error).message}. It was left untouched.`, ...byHand].join("\n"));
   }
 }
+
+const manualAdd = (path: string, key: string, name: string, entry: unknown) => [
+  `Add this under "${key}" in ${path}:`,
+  `  ${JSON.stringify(name)}: ${JSON.stringify(entry)}`,
+];
+
+const manualRemove = (path: string, key: string, name: string) => [`Delete "${name}" under "${key}" in ${path}.`];
 
 /** The content the file must have after the edit: `before` with one server set or removed. */
 function expected(before: JsonObject, key: string, name: string, value: unknown): JsonObject {
@@ -85,11 +99,8 @@ export const describeFileAdd = (env: Env, spec: FileSpec, scope: Scope, name: st
 export const describeFileRemove = (env: Env, spec: FileSpec, scope: Scope, name: string) =>
   `edit ${spec.path(env, scope)}: delete ${spec.key}.${name}`;
 
-export const manualFileAdd = (env: Env, spec: FileSpec, scope: Scope, name: string, url: string) => [
-  `Add this under "${spec.key}" in ${spec.path(env, scope)}:`,
-  `  ${JSON.stringify(name)}: ${JSON.stringify(spec.entry(url))}`,
-];
+export const manualFileAdd = (env: Env, spec: FileSpec, scope: Scope, name: string, url: string) =>
+  manualAdd(spec.path(env, scope), spec.key, name, spec.entry(url));
 
-export const manualFileRemove = (env: Env, spec: FileSpec, scope: Scope, name: string) => [
-  `Delete "${name}" under "${spec.key}" in ${spec.path(env, scope)}.`,
-];
+export const manualFileRemove = (env: Env, spec: FileSpec, scope: Scope, name: string) =>
+  manualRemove(spec.path(env, scope), spec.key, name);
