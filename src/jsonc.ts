@@ -128,6 +128,14 @@ function remove(text: string, object: Node, property: Node): Edit[] {
   const after = gap(text, end(property), next ? next.offset : end(object) - 1);
   const cut = (from: number, to: number): Edit => ({ offset: from, length: to - from, content: "" });
 
+  // The only property goes: the object closes up to `{}` instead of keeping
+  // an empty line, unless a comment in it would be lost.
+  if (!previous && !next) {
+    const inner = text.slice(object.offset + 1, end(object) - 1);
+    const rest = inner.slice(0, property.offset - object.offset - 1) + inner.slice(after.contentEnd - object.offset - 1);
+    if (!rest.trim()) return [cut(object.offset + 1, end(object) - 1)];
+  }
+
   const lineStart = text.lastIndexOf("\n", property.offset - 1) + 1;
   const ownLine = lineStart > object.offset && !text.slice(lineStart, property.offset).trim();
   if (ownLine) {

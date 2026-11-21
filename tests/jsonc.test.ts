@@ -59,7 +59,6 @@ describe("editKey leaves the neighbours alone", () => {
     ["a neighbour written on one line", '{\n  "m": {\n    "a": { "url": "x" }\n  }\n}\n', `{\n  "m": {\n    "a": { "url": "x" },\n    ${NEW}\n  }\n}\n`],
     ["a comment behind the last property", '{\n  "m": {\n    "a": 1 // about a\n  }\n}\n', `{\n  "m": {\n    "a": 1, // about a\n    ${NEW}\n  }\n}\n`],
     ["a comment on its own line at the end", '{\n  "m": {\n    "a": 1\n    // "b": 2\n  }\n}\n', `{\n  "m": {\n    "a": 1,\n    // "b": 2\n    ${NEW}\n  }\n}\n`],
-    ["an empty multi-line object", '{\n  "m": {\n  }\n}\n', `{\n  "m": {\n    ${NEW}\n  }\n}\n`],
   ])("%s, and removal restores the file", (_label, before, after) => {
     expect(set(before)).toBe(after);
     expect(unset(after)).toBe(before);
@@ -67,6 +66,14 @@ describe("editKey leaves the neighbours alone", () => {
 
   it("opens up an empty one-line object", () => {
     expect(set('{\n  "m": {}\n}\n')).toBe(`{\n  "m": {\n    ${NEW}\n  }\n}\n`);
+  });
+
+  // `{}` and an object left open over two lines look the same once an entry
+  // is in, so removal cannot restore both. It closes to `{}`, the usual shape.
+  it("fills an empty multi-line object and closes it again on removal", () => {
+    const after = set('{\n  "m": {\n  }\n}\n');
+    expect(after).toBe(`{\n  "m": {\n    ${NEW}\n  }\n}\n`);
+    expect(unset(after)).toBe('{\n  "m": {}\n}\n');
   });
 
   it("keeps a one-line object on one line", () => {
@@ -211,5 +218,20 @@ describe("editKey on generated files", () => {
         expect(removed, `seed ${seed}:\n${text}\n->\n${added}\n->\n${removed}`).toBe(text);
       }
     }
+  });
+});
+
+describe("editKey when the last server goes", () => {
+  it("closes the emptied object and gives back a one-line original", () => {
+    const original = '{\n  "servers": {}\n}\n';
+    const added = editKey(original, ["servers", "loookin"], ENTRY);
+    expect(editKey(added, ["servers", "loookin"], undefined)).toBe(original);
+  });
+
+  it("keeps a comment that sits in the emptied object", () => {
+    const text = '{\n  "servers": {\n    // mine\n    "loookin": { "url": "x" }\n  }\n}\n';
+    const removed = editKey(text, ["servers", "loookin"], undefined);
+    expect(removed).toContain("// mine");
+    expect(parseJsonc(removed)).toMatchObject({ kind: "ok", value: { servers: {} } });
   });
 });
