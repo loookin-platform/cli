@@ -1,6 +1,6 @@
 {
   "name": "@loookin/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Connect your AI clients and your project to a Loookin workspace.",
   "license": "MIT",
   "type": "module",
