@@ -157,7 +157,7 @@ export async function init(env: Env, flags: InitFlags): Promise<number> {
 
   keyHelp(env, workspace, list);
 
-  const mcpCommand = `loookin mcp add --workspace ${workspaceValue(workspace)}`;
+  const mcpCommand = `npx @loookin/cli mcp add --workspace ${workspaceValue(workspace)}`;
   if (flags.dryRun) {
     env.out(`\nTo connect your AI clients to this workspace: ${mcpCommand}`);
     env.out("\nDry run: nothing was changed.");

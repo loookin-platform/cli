@@ -86,7 +86,7 @@ describe("init: what it recognises and does", () => {
     expect(out(env)).toContain(file);
     expect(out(env)).toContain("https://acme.loookin.com/developers");
     expect(out(env)).toContain("publishable key");
-    expect(out(env)).toContain("loookin mcp add --workspace acme");
+    expect(out(env)).toContain("npx @loookin/cli mcp add --workspace acme");
     expectNoSecrets(env.text());
   });
 
@@ -354,7 +354,7 @@ describe("init: without a terminal", () => {
     expect(await run(env, "--workspace", "acme", "--yes")).toBe(0);
     expect(env.questions).toEqual([]);
     expect(commands(env)).toEqual(["npm install @loookin/sdk"]);
-    expect(out(env)).toContain("loookin mcp add --workspace acme");
+    expect(out(env)).toContain("npx @loookin/cli mcp add --workspace acme");
   });
 });
 
